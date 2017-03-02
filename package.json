@@ -2,7 +2,7 @@
     "name": "vscode-tinypg",
     "displayName": "vscode-tinypg",
     "description": "",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "publisher": "joeandaverde",
     "engines": {
         "vscode": "^1.5.0"
@@ -22,7 +22,7 @@
     },
     "dependencies": {
         "lodash": "4.17.4",
-        "tinypg": "2.0.0-alpha.11"
+        "tinypg": "2.0.0-alpha.12"
     },
     "devDependencies": {
         "typescript": "^2.0.3",
