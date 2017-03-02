@@ -1,12 +1,14 @@
 'use strict';
 import * as vscode from 'vscode'
 import * as _ from 'lodash'
+import * as ts from 'typescript'
+import * as TinyPg from 'tinypg'
 
 const TS_MODE: vscode.DocumentFilter = { language: 'typescript', scheme: 'file' }
 
 const SqlCallRegex = new RegExp(`sql\\(['"]([^'"]+)['"]`)
 
-async function getTinyFileUri(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Uri> {
+async function getTinyFileUriFromPosition(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Uri> {
     const line = document.lineAt(position).text
     const matches = SqlCallRegex.exec(line)
 
@@ -14,7 +16,11 @@ async function getTinyFileUri(document: vscode.TextDocument, position: vscode.Po
         return null
     }
 
-    const path_to_search = `**/${matches[1].replace('.', '/')}.sql`
+    return await findTinySqlFile(matches[1])
+}
+
+export async function findTinySqlFile(sql_file_key: string): Promise<vscode.Uri> {
+    const path_to_search = `**/${sql_file_key.replace('.', '/')}.sql`
 
     const file_uris = await vscode.workspace.findFiles(path_to_search, '**/node_modules/**')
 
@@ -25,9 +31,42 @@ async function getTinyFileUri(document: vscode.TextDocument, position: vscode.Po
     return file_uris[0]
 }
 
+export function foo(document: vscode.TextDocument) {
+    const source_file = ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.ES2016, true)
+    const found_calls: ts.CallExpression[] = []
+
+    const findAllTinyCalls = (n: ts.Node) => {
+        if (n.kind === ts.SyntaxKind.CallExpression) {
+            const call_expression = <ts.CallExpression> n
+            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
+            const property_name = property_expression.name.text
+
+            if (property_name === 'sql' && call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral) {
+                found_calls.push(call_expression)
+            }
+        }
+
+        ts.forEachChild(n, findAllTinyCalls)
+    }
+
+    findAllTinyCalls(source_file)
+
+    found_calls.map(call_expression => {
+        const sql_call_key = (<ts.StringLiteral> call_expression.arguments[0]).text
+
+        if (call_expression.arguments[1] && call_expression.arguments[1].kind === ts.SyntaxKind.ObjectLiteralExpression) {
+            const object_literal_exp = <ts.ObjectLiteralExpression> call_expression.arguments[1]
+            const assigned_object_properties = <ts.PropertyAssignment[]> object_literal_exp.properties.filter(x => x.kind === ts.SyntaxKind.PropertyAssignment)
+            const property_names = assigned_object_properties.map(x => x.name.getText())
+
+            found_calls.push()
+        }
+    })
+
+}
 export class TinyHoverProvider implements vscode.HoverProvider {
     public async provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover> {
-        const file_uri = await getTinyFileUri(document, position)
+        const file_uri = await getTinyFileUriFromPosition(document, position)
 
         if (!file_uri) {
             return null
@@ -44,7 +83,7 @@ export class TinyHoverProvider implements vscode.HoverProvider {
 
 export class TinyGoToProvider implements vscode.DefinitionProvider {
     public async provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Location> {
-        const file_uri = await getTinyFileUri(document, position)
+        const file_uri = await getTinyFileUriFromPosition(document, position)
 
         if (!file_uri) {
             return null
