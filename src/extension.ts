@@ -6,7 +6,9 @@ import * as TinyPg from 'tinypg'
 
 const TS_MODE: vscode.DocumentFilter = { language: 'typescript', scheme: 'file' }
 
-const SqlCallRegex = new RegExp(`sql[^(]*\\(['"]([^'"]+)['"]`)
+const SqlCallRegex = new RegExp(`sql[^(]*\\(['"\`]([^'"]+)['"\`]`)
+
+const QueryCallRegex = new RegExp(`query[^(]*\\(['"\`]`)
 
 async function getTinyFileUriFromPosition(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Uri> {
     const line = document.lineAt(position).text
@@ -40,6 +42,14 @@ interface TinyCallSearchResult {
     end_position: vscode.Position
 }
 
+interface QueryCallSearchResult {
+    parsed_sql_expression: TinyPg.SqlParseResult
+    property_names: string[]
+    all_property_assignment: boolean
+    start_position: vscode.Position
+    end_position: vscode.Position
+}
+
 export async function checkForSqlBindings(document: vscode.TextDocument): Promise<vscode.Diagnostic[]> {
     const source_file = ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.ES2016, true)
 
@@ -47,7 +57,7 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
         return []
     }
 
-    const found_calls: ts.CallExpression[] = []
+    const found_sql_calls: ts.CallExpression[] = []
 
     const findAllTinyCalls = (n: ts.Node) => {
         if (n.kind === ts.SyntaxKind.CallExpression) {
@@ -61,7 +71,7 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
             const property_name = property_expression.name.text
 
             if (property_name === 'sql' && call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral) {
-                found_calls.push(call_expression)
+                found_sql_calls.push(call_expression)
             }
         }
 
@@ -70,7 +80,7 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
 
     findAllTinyCalls(source_file)
 
-    let results: TinyCallSearchResult[] = await Promise.all(found_calls.map(async call_expression => {
+    let results: TinyCallSearchResult[] = await Promise.all(found_sql_calls.map(async call_expression => {
         if (call_expression.arguments.length < 2) {
             return null
         }
@@ -146,6 +156,104 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
     return diagnostic_results
 }
 
+export async function checkQueryBindings(document: vscode.TextDocument): Promise<vscode.Diagnostic[]> {
+    const source_file = ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.ES2016, true)
+
+    if (!source_file) {
+        return []
+    }
+
+    const found_query_calls: ts.CallExpression[] = []
+
+    const findAllTinyCalls = (n: ts.Node) => {
+        if (n.kind === ts.SyntaxKind.CallExpression) {
+            const call_expression = <ts.CallExpression> n
+            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
+
+            if (property_expression && property_expression.name) {
+                const property_name = property_expression.name.text
+
+                // learn to deal with TemplateExpression
+                if (property_name === 'query') {
+                    if (call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral || call_expression.arguments[0].kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+                        found_query_calls.push(call_expression)
+                    }
+                }
+            }
+        }
+
+        ts.forEachChild(n, findAllTinyCalls)
+    }
+
+    findAllTinyCalls(source_file)
+
+    let results: QueryCallSearchResult[] = await Promise.all(found_query_calls.map(async call_expression => {
+        if (call_expression.arguments.length < 2) {
+            return null
+        }
+
+        const query_text = (<ts.StringLiteral> call_expression.arguments[0]).text
+
+        const object_literal_exp = <ts.ObjectLiteralExpression> call_expression.arguments[1]
+
+        const assigned_object_properties = <ts.PropertyAssignment[]> object_literal_exp.properties.filter(x => x.kind === ts.SyntaxKind.PropertyAssignment || x.kind === ts.SyntaxKind.ShorthandPropertyAssignment)
+
+        const property_names = assigned_object_properties.map(x => x.name.getText())
+
+        const start_position = document.positionAt(object_literal_exp.pos)
+
+        const end_position = document.positionAt(object_literal_exp.end)
+
+        const parsed_sql_expression = TinyPg.parseSql(query_text)
+
+        return {
+            start_position,
+            end_position,
+            parsed_sql_expression,
+            property_names,
+            all_property_assignment: property_names.length === object_literal_exp.properties.length,
+        }
+    }))
+
+    const checkForExtraProperties = (x: QueryCallSearchResult) => {
+        return {
+            query_call: x,
+            extra_properties: x.property_names.filter(p => {
+                return !x.parsed_sql_expression.mapping.some(x => x.name === p)
+            })
+        }
+    }
+
+    const checkForMissingProperties = (x: QueryCallSearchResult) => {
+        return {
+            query_call: x,
+            missing_properties: x.parsed_sql_expression.mapping.filter(p => {
+                return !x.property_names.some(n => p.name === n)
+            }).map(p => p.name)
+        }
+    }
+
+    results = results.filter(x => x)
+    const full_verify = results.filter(x => x.all_property_assignment)
+
+    const full_verify_results = full_verify.map(checkForMissingProperties)
+    const partial_verify_results = results.map(checkForExtraProperties)
+
+    const diagnostic_results = []
+        .concat(partial_verify_results.filter(x => !_.isEmpty(x.extra_properties)).map(x => {
+            const range = new vscode.Range(x.query_call.start_position, x.query_call.end_position)
+
+            return new vscode.Diagnostic(range, `Properties [${x.extra_properties.join(', ')}] do not exist in the supplied query.`, vscode.DiagnosticSeverity.Warning)
+        }))
+        .concat(full_verify_results.filter(x => !_.isEmpty(x.missing_properties)).map(x => {
+            const range = new vscode.Range(x.query_call.start_position, x.query_call.end_position)
+
+            return new vscode.Diagnostic(range, `Missing expected properties [${x.missing_properties.join(', ')}].`,vscode.DiagnosticSeverity.Error)
+        }))
+
+    return diagnostic_results
+}
+
 export class TinyHoverProvider implements vscode.HoverProvider {
     public async provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover> {
         const file_uri = await getTinyFileUriFromPosition(document, position)
@@ -179,7 +287,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ctx.subscriptions.push(vscode.languages.registerHoverProvider(TS_MODE, new TinyHoverProvider()))
     ctx.subscriptions.push(vscode.languages.registerDefinitionProvider(TS_MODE, new TinyGoToProvider()))
 
-    const invalid_tiny_parameters = vscode.languages.createDiagnosticCollection('tinypg-invalid-params')
+    const invalid_tiny_file_parameters = vscode.languages.createDiagnosticCollection('tinypg-invalid-sql-params')
+    const invalid_tiny_query_parameters = vscode.languages.createDiagnosticCollection('tinypg-invalid-query-params')
     const missing_tiny_files = vscode.languages.createDiagnosticCollection('tinypg-missing-files')
 
     vscode.workspace.onDidChangeTextDocument(async change_event => {
@@ -189,35 +298,56 @@ export async function activate(ctx: vscode.ExtensionContext) {
             return null
         }
 
-        const tiny_line_changes = change_event.contentChanges.filter(x => SqlCallRegex.test(document.lineAt(x.range.end).text))
+        const tiny_sql_line_changes = change_event.contentChanges.filter(x => SqlCallRegex.test(document.lineAt(x.range.end).text))
+        
+        const tiny_query_line_changes = change_event.contentChanges.filter(x => QueryCallRegex.test(document.lineAt(x.range.end).text))
 
-        if (_.isEmpty(tiny_line_changes)) {
-            return null
+        if (!_.isEmpty(tiny_sql_line_changes)) {
+            await runFileDiagnostics(document, false)
         }
 
-        return await runDiagnostics(document, false)
+        if (!_.isEmpty(tiny_query_line_changes)) {
+            await runQueryDiagnostics(document, true)
+        }
+
+        return
     }, this, ctx.subscriptions)
 
     vscode.workspace.onDidOpenTextDocument(async document => {
-        return await runDiagnostics(document, true)
+        await runFileDiagnostics(document, true)
+        await runQueryDiagnostics(document, true)
+        return
     }, this, ctx.subscriptions)
 
     vscode.workspace.onDidSaveTextDocument(async document => {
-        return await runDiagnostics(document, true)
+        await runFileDiagnostics(document, true)
+        await runQueryDiagnostics(document, true)
+        return
     }, this, ctx.subscriptions)
 
-    async function runDiagnostics(document: vscode.TextDocument, check_params: boolean) {
+    async function runFileDiagnostics(document: vscode.TextDocument, check_params: boolean) {
         if (document.languageId !== 'typescript' && !SqlCallRegex.test(document.getText())) {
             return
         }
 
         if (check_params) {
             const invalid_parameter_diagnostics = await checkForSqlBindings(document)
-            invalid_tiny_parameters.set(document.uri, invalid_parameter_diagnostics)
+            invalid_tiny_file_parameters.set(document.uri, invalid_parameter_diagnostics)
         }
 
         const missing_diagnostics = await missingTinyFiles(document)
         missing_tiny_files.set(document.uri, missing_diagnostics)
+    }
+
+    async function runQueryDiagnostics(document: vscode.TextDocument, check_params: boolean) {
+        if (document.languageId !== 'typescript' && !QueryCallRegex.test(document.getText())) {
+            return
+        }
+
+        if (check_params) {
+            const invalid_parameter_diagnostics = await checkQueryBindings(document)
+            invalid_tiny_query_parameters.set(document.uri, invalid_parameter_diagnostics)
+        }
     }
 }
 
