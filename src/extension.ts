@@ -50,6 +50,29 @@ interface QueryCallSearchResult {
     end_position: vscode.Position
 }
 
+const findAllTinyCalls = (function_name: string, n: ts.Node): ts.CallExpression[] => {
+    let results = []
+
+    if (n.kind === ts.SyntaxKind.CallExpression) {
+        const call_expression = <ts.CallExpression> n
+        const property_expression = <ts.PropertyAccessExpression> call_expression.expression
+
+        if (property_expression && property_expression.name) {
+            const property_name = property_expression.name.text
+
+            if (property_name === function_name) {
+                if (call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral || call_expression.arguments[0].kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+                    results.push(call_expression)
+                }
+            }
+        }
+    }
+
+    ts.forEachChild(n, (x) => results.concat(findAllTinyCalls(function_name, x)))
+
+    return results
+}
+
 export async function checkForSqlBindings(document: vscode.TextDocument): Promise<vscode.Diagnostic[]> {
     const source_file = ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.ES2016, true)
 
@@ -57,28 +80,7 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
         return []
     }
 
-    const found_sql_calls: ts.CallExpression[] = []
-
-    const findAllTinyCalls = (n: ts.Node) => {
-        if (n.kind === ts.SyntaxKind.CallExpression) {
-            const call_expression = <ts.CallExpression> n
-            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
-
-            if (!property_expression || !property_expression.name) {
-                return
-            }
-
-            const property_name = property_expression.name.text
-
-            if (property_name === 'sql' && call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral) {
-                found_sql_calls.push(call_expression)
-            }
-        }
-
-        ts.forEachChild(n, findAllTinyCalls)
-    }
-
-    findAllTinyCalls(source_file)
+    const found_sql_calls = findAllTinyCalls('sql', source_file)
 
     let results: TinyCallSearchResult[] = await Promise.all(found_sql_calls.map(async call_expression => {
         if (call_expression.arguments.length < 2) {
@@ -163,29 +165,7 @@ export async function checkQueryBindings(document: vscode.TextDocument): Promise
         return []
     }
 
-    const found_query_calls: ts.CallExpression[] = []
-
-    const findAllTinyCalls = (n: ts.Node) => {
-        if (n.kind === ts.SyntaxKind.CallExpression) {
-            const call_expression = <ts.CallExpression> n
-            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
-
-            if (property_expression && property_expression.name) {
-                const property_name = property_expression.name.text
-
-                // learn to deal with TemplateExpression
-                if (property_name === 'query') {
-                    if (call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral || call_expression.arguments[0].kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
-                        found_query_calls.push(call_expression)
-                    }
-                }
-            }
-        }
-
-        ts.forEachChild(n, findAllTinyCalls)
-    }
-
-    findAllTinyCalls(source_file)
+    const found_query_calls = findAllTinyCalls('query', source_file)
 
     let results: QueryCallSearchResult[] = await Promise.all(found_query_calls.map(async call_expression => {
         if (call_expression.arguments.length < 2) {
