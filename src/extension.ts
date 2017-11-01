@@ -50,6 +50,25 @@ interface QueryCallSearchResult {
     end_position: vscode.Position
 }
 
+const findAllTinyCalls = (call_name: string, results: ts.CallExpression[], n: ts.Node) => {
+    if (n.kind === ts.SyntaxKind.CallExpression) {
+        const call_expression = <ts.CallExpression> n
+        const property_expression = <ts.PropertyAccessExpression> call_expression.expression
+
+        if (property_expression && property_expression.name) {
+            const property_name = property_expression.name.text
+
+            if (property_name === call_name) {
+                if (call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral || call_expression.arguments[0].kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+                    results.push(call_expression)
+                }
+            }
+        }
+    }
+
+    ts.forEachChild(n, (child) => findAllTinyCalls(call_name, results, child))
+}
+
 export async function checkForSqlBindings(document: vscode.TextDocument): Promise<vscode.Diagnostic[]> {
     const source_file = ts.createSourceFile(document.fileName, document.getText(), ts.ScriptTarget.ES2016, true)
 
@@ -59,26 +78,7 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
 
     const found_sql_calls: ts.CallExpression[] = []
 
-    const findAllTinyCalls = (n: ts.Node) => {
-        if (n.kind === ts.SyntaxKind.CallExpression) {
-            const call_expression = <ts.CallExpression> n
-            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
-
-            if (!property_expression || !property_expression.name) {
-                return
-            }
-
-            const property_name = property_expression.name.text
-
-            if (property_name === 'sql' && call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral) {
-                found_sql_calls.push(call_expression)
-            }
-        }
-
-        ts.forEachChild(n, findAllTinyCalls)
-    }
-
-    findAllTinyCalls(source_file)
+    findAllTinyCalls('sql', found_sql_calls, source_file)
 
     let results: TinyCallSearchResult[] = await Promise.all(found_sql_calls.map(async call_expression => {
         if (call_expression.arguments.length < 2) {
@@ -165,27 +165,7 @@ export async function checkQueryBindings(document: vscode.TextDocument): Promise
 
     const found_query_calls: ts.CallExpression[] = []
 
-    const findAllTinyCalls = (n: ts.Node) => {
-        if (n.kind === ts.SyntaxKind.CallExpression) {
-            const call_expression = <ts.CallExpression> n
-            const property_expression = <ts.PropertyAccessExpression> call_expression.expression
-
-            if (property_expression && property_expression.name) {
-                const property_name = property_expression.name.text
-
-                // learn to deal with TemplateExpression
-                if (property_name === 'query') {
-                    if (call_expression.arguments[0].kind === ts.SyntaxKind.StringLiteral || call_expression.arguments[0].kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
-                        found_query_calls.push(call_expression)
-                    }
-                }
-            }
-        }
-
-        ts.forEachChild(n, findAllTinyCalls)
-    }
-
-    findAllTinyCalls(source_file)
+    findAllTinyCalls('query', found_query_calls, source_file)
 
     let results: QueryCallSearchResult[] = await Promise.all(found_query_calls.map(async call_expression => {
         if (call_expression.arguments.length < 2) {
@@ -299,29 +279,24 @@ export async function activate(ctx: vscode.ExtensionContext) {
         }
 
         const tiny_sql_line_changes = change_event.contentChanges.filter(x => SqlCallRegex.test(document.lineAt(x.range.end).text))
-        
-        const tiny_query_line_changes = change_event.contentChanges.filter(x => QueryCallRegex.test(document.lineAt(x.range.end).text))
 
-        if (!_.isEmpty(tiny_sql_line_changes)) {
-            await runFileDiagnostics(document, false)
+        if (_.isEmpty(tiny_sql_line_changes)) {
+            return
         }
 
-        if (!_.isEmpty(tiny_query_line_changes)) {
-            await runQueryDiagnostics(document, true)
-        }
+        return await runFileDiagnostics(document, false)
 
-        return
     }, this, ctx.subscriptions)
 
     vscode.workspace.onDidOpenTextDocument(async document => {
         await runFileDiagnostics(document, true)
-        await runQueryDiagnostics(document, true)
+        await runQueryDiagnostics(document)
         return
     }, this, ctx.subscriptions)
 
     vscode.workspace.onDidSaveTextDocument(async document => {
         await runFileDiagnostics(document, true)
-        await runQueryDiagnostics(document, true)
+        await runQueryDiagnostics(document)
         return
     }, this, ctx.subscriptions)
 
@@ -339,15 +314,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
         missing_tiny_files.set(document.uri, missing_diagnostics)
     }
 
-    async function runQueryDiagnostics(document: vscode.TextDocument, check_params: boolean) {
+    async function runQueryDiagnostics(document: vscode.TextDocument) {
         if (document.languageId !== 'typescript' && !QueryCallRegex.test(document.getText())) {
             return
         }
 
-        if (check_params) {
-            const invalid_parameter_diagnostics = await checkQueryBindings(document)
-            invalid_tiny_query_parameters.set(document.uri, invalid_parameter_diagnostics)
-        }
+        const invalid_parameter_diagnostics = await checkQueryBindings(document)
+        invalid_tiny_query_parameters.set(document.uri, invalid_parameter_diagnostics)
     }
 }
 
