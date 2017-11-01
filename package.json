@@ -2,7 +2,7 @@
     "name": "vscode-tinypg",
     "displayName": "TinyPG",
     "description": "Diagnostic information for projects using TinyPG.",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "publisher": "joeandaverde",
     "repository": {
         "url": "https://github.com/joeandaverde/vscode-tinypg"
