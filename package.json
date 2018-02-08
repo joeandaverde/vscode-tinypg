@@ -25,14 +25,14 @@
     },
     "dependencies": {
         "lodash": "4.17.4",
-        "tinypg": "2.0.0-alpha.12",
-        "typescript": "^2.0.3"
+        "tinypg": "2.0.1",
+        "typescript": "2.7.1"
     },
     "devDependencies": {
-        "vscode": "^1.0.0",
-        "mocha": "^2.3.3",
-        "@types/node": "^6.0.40",
-        "@types/lodash": "4.14.53",
-        "@types/mocha": "^2.2.32"
+        "vscode": "1.1.10",
+        "mocha": "5.0.0",
+        "@types/node": "8.9.1",
+        "@types/lodash": "4.14.102",
+        "@types/mocha": "2.2.48"
     }
 }
