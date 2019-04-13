@@ -6,9 +6,8 @@ import { parseSql, SqlParseResult } from 'tinypg-parser'
 
 const TS_MODE: vscode.DocumentFilter = { language: 'typescript', scheme: 'file' }
 
-const SqlCallRegex = new RegExp(`sql[^(]*\\(\s*['"\`]([^'"]+)['"\`]`)
-
-const QueryCallRegex = new RegExp(`query[^(]*\\(['"\`]`)
+const SqlCallRegex = /\.sql[^(]*\(\s*['"\`]([^'"\`]+)['"\`]/
+const QueryCallRegex = /\.query[^(]*\(['"\`]/
 
 async function getTinyFileUriFromPosition(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Uri> {
    const line = document.lineAt(position).text
