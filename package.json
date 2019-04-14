@@ -9,13 +9,10 @@
     "bugs": {
         "url": "https://github.com/joeandaverde/vscode-tinypg/issues"
     },
-    "version": "1.0.0",
+    "version": "1.0.1",
     "engines": {
         "vscode": "^1.33.0"
     },
-    "categories": [
-        "Other"
-    ],
     "activationEvents": [
         "onLanguage:typescript"
     ],
@@ -30,11 +27,11 @@
         "@types/lodash": "^4.14.123",
         "@types/node": "^10.12.21",
         "tslint": "^5.12.1",
-        "typescript": "^3.3.1",
         "vscode": "^1.1.28"
     },
     "dependencies": {
         "lodash": "^4.17.11",
-        "tinypg-parser": "^1.0.5"
+        "tinypg-parser": "^1.0.5",
+        "typescript": "^3.4.3"
     }
 }
