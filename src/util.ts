@@ -125,8 +125,11 @@ export async function collectTinyCallDetails(document: vscode.TextDocument): Pro
                   return null
                }
 
-               const sql_call_key = (<ts.StringLiteral>call_expression.arguments[0]).text
-               const sql_call_range = new vscode.Range(document.positionAt(call_expression.pos), document.positionAt(call_expression.end))
+               const sql_call_key = (<ts.StringLiteralLike>call_expression.arguments[0]).text
+               const sql_call_range = new vscode.Range(
+                  document.positionAt(call_expression.arguments[0].pos),
+                  document.positionAt(call_expression.arguments[0].end)
+               )
 
                const getObjectLiteralProperties = () => {
                   if (call_expression.arguments[1].kind !== ts.SyntaxKind.ObjectLiteralExpression) {

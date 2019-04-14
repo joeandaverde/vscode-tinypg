@@ -109,11 +109,11 @@ export async function checkForSqlBindings(document: vscode.TextDocument): Promis
       .filter(x => _.isNil(x.sql_file.uri))
       .map(x => ({ range: x.sql_call_range, key: x.sql_call_key, file: x.sql_file }))
 
-   const file_groups = _.groupBy(tiny_calls, x => x.sql_call_key)
+   const file_groups = _.groupBy(missing_files, x => x.key)
 
-   const missing_file_diagnostics = _.flatMap(missing_files, n => {
-      return file_groups[n.key].map(f => {
-         return new vscode.Diagnostic(n.range, `TinyPg: SQL file [${n.key}] not found.`, vscode.DiagnosticSeverity.Error)
+   const missing_file_diagnostics = _.flatMap(file_groups, (missing, key) => {
+      return missing.map(m => {
+         return new vscode.Diagnostic(m.range, `TinyPg: SQL file [${key}] not found.`, vscode.DiagnosticSeverity.Error)
       })
    })
 

@@ -1,7 +1,14 @@
 {
     "name": "vscode-tinypg",
-    "displayName": "vscode-tinypg",
+    "displayName": "TinyPG",
     "description": "Diagnostic information for projects using TinyPG.",
+    "publisher": "joeandaverde",
+    "repository": {
+        "url": "https://github.com/joeandaverde/vscode-tinypg"
+    },
+    "bugs": {
+        "url": "https://github.com/joeandaverde/vscode-tinypg/issues"
+    },
     "version": "1.0.0",
     "engines": {
         "vscode": "^1.33.0"
